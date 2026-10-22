@@ -1,0 +1,62 @@
+  services:
+  redis:
+    image: redis:7.2
+    container_name: redis-server
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    restart: unless-stopped
+    networks:
+      - shared-network
+  mongo:
+    image: ${MONGO_IMAGE_VERSION:-mongo:6.0}
+    container_name: ${MONGO_CONTAINER_NAME:-mongo}
+    restart: unless-stopped
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-admin}
+    volumes:
+      - ${MONGO_DATA_PATH:-./mongo_data}:/data/db
+    networks:
+      - ${DOCKER_NETWORK_NAME:-shared-network}
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  mongo-express:
+    image: ${MONGO_EXPRESS_IMAGE_VERSION:-mongo-express:1.0.2}
+    container_name: ${MONGO_EXPRESS_CONTAINER_NAME:-mongo-express}
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "${MONGO_EXPRESS_PORT:-8081}:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${ME_CONFIG_MONGODB_ADMINUSERNAME}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${ME_CONFIG_MONGODB_ADMINPASSWORD}
+      ME_CONFIG_MONGODB_SERVER: ${ME_CONFIG_MONGODB_SERVER:-mongo}
+      ME_CONFIG_MONGODB_PORT: ${ME_CONFIG_MONGODB_PORT:-27017}
+      ME_CONFIG_MONGODB_ENABLE_ADMIN: ${ME_CONFIG_MONGODB_ENABLE_ADMIN:-true}
+      ME_CONFIG_BASICAUTH_USERNAME: ${ME_CONFIG_BASICAUTH_USERNAME}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${ME_CONFIG_BASICAUTH_PASSWORD}
+    networks:
+      - ${DOCKER_NETWORK_NAME:-shared-network}
+
+
+networks:
+   shared-network:
+     external: true
+     name: ${DOCKER_NETWORK_NAME:-shared-network}
+
+volumes:
+  redis-data:
