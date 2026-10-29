@@ -11,6 +11,7 @@ services:
     restart: unless-stopped
     networks:
       - shared-network
+
   mongo:
     image: ${MONGO_IMAGE_VERSION:-mongo:6.0}
     container_name: ${MONGO_CONTAINER_NAME:-mongo}
@@ -51,10 +52,33 @@ services:
       ME_CONFIG_BASICAUTH_PASSWORD: ${ME_CONFIG_BASICAUTH_PASSWORD}
     networks:
       - ${DOCKER_NETWORK_NAME:-shared-network}
+
+  # --- CONTENEDOR PYTHON (conectado a ../src) ---
+  python-server:
+    image: python:3.11-alpine
+    container_name: python-server
+    restart: unless-stopped
+    volumes:
+      # Carpeta de código fuente
+      - ../src:/app
+      # Carpeta de datos compartida
+      - ../data:/app/data
+    working_dir: /app
+    # Instala las dependencias y luego se queda escuchando/vivo
+    command: >
+      sh -c "if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi &&
+             tail -f /dev/null"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - REDIS_HOST=redis
+      - MONGO_HOST=mongo
+    networks:
+      - ${DOCKER_NETWORK_NAME:-shared-network}
+
 networks:
-   shared-network:
-     external: true
-     name: ${DOCKER_NETWORK_NAME:-shared-network}
+  shared-network:
+    external: true
+    name: ${DOCKER_NETWORK_NAME:-shared-network}
 
 volumes:
   redis-data:

@@ -1,0 +1,3 @@
+# acceso al contenedor python y lanzamiento de "etl..."
+
+docker exec -it python-server python etl_historico.py
