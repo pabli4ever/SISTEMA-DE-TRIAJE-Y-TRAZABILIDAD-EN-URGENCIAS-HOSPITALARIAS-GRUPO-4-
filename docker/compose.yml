@@ -63,7 +63,8 @@ services:
       - ../src:/app
       # Carpeta de datos compartida
       - ../data:/app/data
-        ../requirements.txt:/app/requirements.txt
+
+      - ../requirements.txt:/app/requirements.txt
     working_dir: /app
     # Instala las dependencias y luego se queda escuchando/vivo
     command: >
