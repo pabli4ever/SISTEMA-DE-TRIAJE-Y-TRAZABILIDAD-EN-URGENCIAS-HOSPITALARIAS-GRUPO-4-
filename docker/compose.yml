@@ -1,4 +1,4 @@
-  services:
+services:
   redis:
     image: redis:7.2
     container_name: redis-server
@@ -51,8 +51,6 @@
       ME_CONFIG_BASICAUTH_PASSWORD: ${ME_CONFIG_BASICAUTH_PASSWORD}
     networks:
       - ${DOCKER_NETWORK_NAME:-shared-network}
-
-
 networks:
    shared-network:
      external: true
