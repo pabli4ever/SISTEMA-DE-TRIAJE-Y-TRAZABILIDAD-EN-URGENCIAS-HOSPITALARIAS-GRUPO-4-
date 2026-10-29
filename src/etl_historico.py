@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 import requests
+import json
 
 
 CARPETA_DATOS = Path("data")
@@ -86,3 +87,14 @@ if __name__ == "__main__":
 
     # Mostramos una única tabla con todas las filas, columnas y textos completos.
     print(datos_unidos.to_string(index=False))
+    
+    nombre_archivo = "./data/estado_urgencias.json"
+
+# Abrir el archivo en modo escritura ('w') con codificación utf-8
+with open(nombre_archivo, "w", encoding="utf-8") as archivo:
+    # json.dump convierte el objeto de Python a formato JSON y lo escribe en el archivo
+    # ensure_ascii=False permite guardar acentos y eñes correctamente
+    # indent=4 le da un formato bonito y legible (con saltos de línea y anidación)
+    json.dump(datos_unidos.to_string(index=False), archivo, ensure_ascii=False, indent=4)
+
+print(f"[+] Archivo JSON guardado exitosamente en '{nombre_archivo}'")
