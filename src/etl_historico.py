@@ -66,6 +66,7 @@ def cruzar_datos(datos_csv, datos_json):
 
     # Añadimos el parte clínico a cada episodio del CSV.
     datos_unidos = pd.merge(datos_csv, datos_json, on="id_episodio", how="left")
+    datos_unidos = datos_unidos.fillna("")
     return datos_unidos
 
 
