@@ -1,0 +1,19 @@
+services:
+  api-urgencias:
+    build: .
+    container_name: api_urgencias_carestream
+    restart: unless-stopped
+    networks:
+      - shared-network
+    ports:
+      - "${API_URGENCIAS_PORT:-28000}:28000"
+    volumes:
+      # Montaje opcional en desarrollo para que recargue si editas el script:
+      - ./main.py:/app/main.py:ro
+    environment:
+      - TZ=Europe/Madrid
+
+networks:
+  shared-network:
+    external: true
+    name: ${DOCKER_NETWORK_NAME:-shared-network}
