@@ -1,8 +1,8 @@
 from pathlib import Path
+import json
 
 import pandas as pd
 import requests
-import json
 
 
 CARPETA_DATOS = Path("data")
@@ -23,58 +23,119 @@ def descargar_archivos(url_csv, url_json):
 
 
 def cargar_csv():
-    datos_csv = pd.read_csv(CARPETA_DATOS / "admisiones_historico.csv")
+    datos_csv = pd.read_csv(
+        CARPETA_DATOS / "admisiones_historico.csv",
+        encoding="utf-8-sig",
+        na_values=[
+            "N/D", "s/d", "ERROR", "PENDIENTE",
+            "None", "null", "NULL", ""
+        ]
+    )
+
     return datos_csv
 
 
 def cargar_json():
-    datos_json = pd.read_json(CARPETA_DATOS / "partes_clinicos.json")
-    return datos_json
+    with open(
+        CARPETA_DATOS / "partes_clinicos.json",
+        "r",
+        encoding="utf-8"
+    ) as archivo:
+        datos = json.load(archivo)
+
+    return datos
 
 
 def limpiar_datos(datos_csv, datos_json):
-    # Quitamos duplicados.
-    datos_csv = datos_csv.drop_duplicates(subset="id_episodio").copy()
-    datos_json = datos_json.drop_duplicates(subset="id_episodio").copy()
 
-    # Sustituimos los textos de ausencia por nulos.
-    datos_csv = datos_csv.replace(
-        ["N/D", "s/d", "ERROR", "None", "null", "NULL", ""], pd.NA
-    )
-
-    # Unificamos las fechas; sin zona horaria se asumen UTC.
-    for columna in ["timestamp_llegada", "timestamp_alta"]:
-        datos_csv[columna] = pd.to_datetime(
-            datos_csv[columna], format="mixed",
-            dayfirst=True, errors="coerce", utc=True
+    # Limpiar espacios en los textos del CSV.
+    for columna in datos_csv.select_dtypes(include="object").columns:
+        datos_csv[columna] = datos_csv[columna].map(
+            lambda valor: valor.strip()
+            if isinstance(valor, str)
+            else valor
         )
 
-    # Convertimos pulsaciones a números y quitamos valores incorrectos.
-    pulsaciones = pd.to_numeric(datos_csv["frecuencia_cardiaca"], errors="coerce")
-    # Convertimos a número; los textos no válidos pasan a NaN.
-    datos_csv["frecuencia_cardiaca"] = pd.to_numeric(
-        datos_csv["frecuencia_cardiaca"], errors="coerce"
+    # Sustituir textos de ausencia por valores nulos.
+    datos_csv.replace(
+        ["N/D", "s/d", "ERROR", "PENDIENTE",
+         "None", "null", "NULL", ""],
+        pd.NA,
+        inplace=True
     )
 
-    # Conservamos únicamente las filas con frecuencias dentro del rango.
-    datos_csv = datos_csv.loc[
-        datos_csv["frecuencia_cardiaca"].between(1, 300)
-    ].copy()
+    # Eliminar episodios duplicados del CSV.
+    datos_csv = datos_csv.drop_duplicates(
+        subset="id_episodio"
+    ).copy()
 
+    # Unificar las fechas.
+    for columna in ["timestamp_llegada", "timestamp_alta"]:
+        datos_csv[columna] = pd.to_datetime(
+            datos_csv[columna],
+            format="mixed",
+            dayfirst=True,
+            errors="coerce",
+            utc=True
+        )
+
+    # Convertir las pulsaciones a números.
+    datos_csv["frecuencia_cardiaca"] = pd.to_numeric(
+        datos_csv["frecuencia_cardiaca"],
+        errors="coerce"
+    )
+
+    # Marcar como nulas las frecuencias fuera del rango permitido.
+    datos_csv["frecuencia_cardiaca"] = (
+        datos_csv["frecuencia_cardiaca"].where(
+            datos_csv["frecuencia_cardiaca"].between(1, 300)
+        )
+    )
+
+    # Normalizar los destinos del alta.
     datos_csv["destino_alta"] = (
-        datos_csv["destino_alta"].str.strip().str.lower()
+        datos_csv["destino_alta"]
+        .astype("string")
+        .str.strip()
+        .str.lower()
         .str.replace(r"^alta_", "", regex=True)
     )
+
+    # Devolver el CSV limpio y el JSON original.
     return datos_csv, datos_json
 
-
 def cruzar_datos(datos_csv, datos_json):
-    # El SIP coincide en ambos archivos; conservamos el del CSV para no repetirlo.
-    datos_json = datos_json.drop(columns="sip_paciente")
 
-    # Añadimos el parte clínico a cada episodio del CSV.
-    datos_unidos = pd.merge(datos_csv, datos_json, on="id_episodio", how="left")
-    datos_unidos = datos_unidos.fillna("")
+    # Convertir el CSV en una lista de diccionarios.
+    registros_csv = json.loads(
+        datos_csv.to_json(orient="records", date_format="iso")
+    )
+
+    # Crear un diccionario para localizar los informes clínicos.
+    partes_por_id = {
+        str(parte["id_episodio"]): parte
+        for parte in datos_json
+    }
+
+    datos_unidos = []
+
+    # Recorrer los episodios del CSV.
+    for registro in registros_csv:
+
+        identificador = str(registro["id_episodio"])
+
+        # Buscar su informe clínico.
+        parte = partes_por_id.get(identificador)
+
+        if parte:
+            parte = parte.copy()
+            parte.pop("id_episodio", None)
+            parte.pop("sip_paciente", None)
+
+            registro["parte_clinico"] = parte
+
+        datos_unidos.append(registro)
+
     return datos_unidos
 
 
@@ -91,19 +152,24 @@ if __name__ == "__main__":
     datos_csv = cargar_csv()
     datos_json = cargar_json()
 
-    datos_csv, datos_json = limpiar_datos(datos_csv, datos_json)
-    datos_unidos = cruzar_datos(datos_csv, datos_json)
+    datos_csv, datos_json = limpiar_datos(
+        datos_csv,
+        datos_json
+    )
 
-    # Mostramos una única tabla con todas las filas, columnas y textos completos.
-    print(datos_unidos.to_string(index=False))
-    
-    nombre_archivo = "./data/estado_urgencias.json"
+    # Cruzar ambos DataFrames.
+    datos_unidos = cruzar_datos(
+        datos_csv,
+        datos_json
+    )
 
-# Abrir el archivo en modo escritura ('w') con codificación utf-8
-with open(nombre_archivo, "w", encoding="utf-8") as archivo:
-    # json.dump convierte el objeto de Python a formato JSON y lo escribe en el archivo
-    # ensure_ascii=False permite guardar acentos y eñes correctamente
-    # indent=4 le da un formato bonito y legible (con saltos de línea y anidación)
-    json.dump(datos_unidos.to_string(index=False), archivo, ensure_ascii=False, indent=4)
+    # Exportar los datos a JSON.
+    nombre_archivo = CARPETA_DATOS / "estado_urgencias.json"
 
-print(f"[+] Archivo JSON guardado exitosamente en '{nombre_archivo}'")
+    with open(nombre_archivo, "w", encoding="utf-8") as archivo:
+        json.dump(datos_unidos, archivo, ensure_ascii=False, indent=4)
+
+    print(
+        f"\n[+] Archivo JSON guardado correctamente: "
+        f"{nombre_archivo}"
+    )
