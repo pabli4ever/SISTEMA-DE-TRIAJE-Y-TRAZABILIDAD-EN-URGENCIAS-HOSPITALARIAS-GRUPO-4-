@@ -51,7 +51,15 @@ def limpiar_datos(datos_csv, datos_json):
 
     # Convertimos pulsaciones a números y quitamos valores incorrectos.
     pulsaciones = pd.to_numeric(datos_csv["frecuencia_cardiaca"], errors="coerce")
-    datos_csv["frecuencia_cardiaca"] = pulsaciones.where(pulsaciones.between(1, 300))
+    # Convertimos a número; los textos no válidos pasan a NaN.
+    datos_csv["frecuencia_cardiaca"] = pd.to_numeric(
+        datos_csv["frecuencia_cardiaca"], errors="coerce"
+    )
+
+    # Conservamos únicamente las filas con frecuencias dentro del rango.
+    datos_csv = datos_csv.loc[
+        datos_csv["frecuencia_cardiaca"].between(1, 300)
+    ].copy()
 
     datos_csv["destino_alta"] = (
         datos_csv["destino_alta"].str.strip().str.lower()
