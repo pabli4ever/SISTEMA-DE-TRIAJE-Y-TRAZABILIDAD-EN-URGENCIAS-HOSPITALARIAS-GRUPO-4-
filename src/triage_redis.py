@@ -122,25 +122,3 @@ def gestionar_boxes():
     return eventos_locales
     # Si había pacientes esperando, guarda el episodio y la hora de entrada en el Hash del box, 
     # activa el indicador de ocupado y registra el evento.
-
-def obtener_estado_cola(limite=7):
-    """Devuelve la longitud de la cola y los siguientes pacientes priorizados."""
-    longitud = redis_client.zcard(COL_ESPERA)
-    siguientes = redis_client.zrange(COL_ESPERA, 0, limite - 1, withscores=True)
-    return longitud, siguientes
-    # Consulta el número total de elementos en la cola (ZCARD) y extrae un rango limitado (ZRANGE) con sus scores.
-
-def obtener_info_episodio(id_episodio):
-    """Recupera los datos del hash de un episodio."""
-    return redis_client.hgetall(f"episodio:{id_episodio}")
-    # Devuelve el diccionario completo almacenado en el Hash del episodio indicado.
-
-def comprobar_box_ocupado(box_id):
-    """Verifica si un box está ocupado."""
-    return redis_client.get(f"box:{box_id}:ocupado")
-    # Retorna el estado de la bandera de ocupación de un box específico.
-
-def obtener_datos_box(box_id):
-    """Obtiene la información del box actual."""
-    return redis_client.hgetall(f"box:{box_id}")
-    # Devuelve el contenido del Hash asociado al box.
