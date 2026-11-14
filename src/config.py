@@ -51,6 +51,12 @@ class Config:
     MONGO_KEYFILE_PATH: str | None = os.getenv("MONGO_KEYFILE_PATH")
 
     # =============================================
+    # CONFIGURACIÓN DE LA APLICACIÓN
+    # =============================================
+    API_URL: str = os.getenv("API_URL", "http://api_urgencias_carestream:28000/api/v1/urgencias/novedades")
+    URL_INSTITUTO: str = os.getenv("URL_INSTITUTO", "")
+
+    # =============================================
     # HELPER: URI DE CONEXIÓN LISTA PARA USAR (PyMongo / Motor)
     # =============================================
     @classmethod

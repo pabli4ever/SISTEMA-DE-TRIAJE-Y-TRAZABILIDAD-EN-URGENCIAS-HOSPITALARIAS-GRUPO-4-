@@ -1,2 +1,3 @@
 # --- Docker Data ---
 mongo_data/
+.env
