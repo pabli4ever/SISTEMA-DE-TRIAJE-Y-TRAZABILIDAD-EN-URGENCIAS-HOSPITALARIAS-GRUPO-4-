@@ -1,5 +1,10 @@
 import redis
 import time
+import json
+
+from pymongo import MongoClient
+from config import settings
+
 
 # Importa la librería cliente de Redis para Python y el módulo nativo de tiempo (time).
 
@@ -51,7 +56,8 @@ def procesar_novedades(data):
                 "sip": datos_admision.get("sip_paciente"),
                 "motivo": datos_admision.get("motivo_consulta"),
                 "color": datos_triaje.get("color"),
-                "patologia": datos_triaje.get("categoria_patologia")
+                "patologia": datos_triaje.get("categoria_patologia"),
+                "documento": json.dumps(paciente, ensure_ascii=False)  
             })
             
             # Crea un Hash en Redis para este episodio (ej. "episodio:EP-1234") guardando 
@@ -66,31 +72,55 @@ def procesar_altas(data):
     """Procesa los pacientes dados de alta: libera boxes y limpia Redis."""
     pacientes_alta = data.get("pacientes_alta", [])
     eventos_locales = []
-    
+
     if not pacientes_alta:
         return eventos_locales
 
     for alta in pacientes_alta:
         id_episodio = alta.get("id_episodio")
-        
+
         # Recorre la lista de altas médicas enviadas por la API extrayendo el ID del episodio que finaliza.
+
+        # Recuperamos los datos completos del paciente desde Redis
+        datos_redis = redis_client.hgetall(f"episodio:{id_episodio}")
+
+        if not datos_redis or "documento" not in datos_redis:
+            eventos_locales.append(f"[!] No se encontraron los datos de {id_episodio}")
+            continue
+
+        documento = json.loads(datos_redis["documento"])
+
+        # Añadimos los datos del alta al documento
+        documento.update(alta)
+
+        # NUEVO: Guardamos el episodio en MongoDB
+        try:
+            cargar_datos_mongo(documento)
+            eventos_locales.append(f"[+] Episodio guardado en MongoDB: {id_episodio}")
+
+        except Exception as e:
+            eventos_locales.append(f"[!] Error al guardar en MongoDB: {e}")
+            continue
+
+        # NUEVO: Eliminamos el episodio de la cola si todavía estuviera esperando
+        redis_client.zrem(COL_ESPERA, id_episodio)
 
         for box_id in range(1, 6):
             box_key = f"box:{box_id}"
             datos_box = redis_client.hgetall(box_key)
-            
+
             if datos_box.get("id_episodio") == id_episodio:
                 redis_client.delete(f"{box_key}:ocupado")
                 redis_client.delete(box_key)
                 eventos_locales.append(f"[-] Box {box_id} liberado por alta de {id_episodio}")
                 break
-        
+
         # Revisa los 5 boxes clínicos (1 al 5) para encontrar cuál estaba ocupado por ese paciente. 
         # Al encontrarlo, borra la clave de ocupación y el hash del box, registrando el evento.
 
         redis_client.delete(f"episodio:{id_episodio}")
         eventos_locales.append(f"[x] Cierre y borrado de Redis: {id_episodio}")
-        
+
     return eventos_locales
     # Elimina definitivamente el Hash con la ficha clínica del paciente en Redis y retorna los eventos.
 
@@ -122,3 +152,22 @@ def gestionar_boxes():
     return eventos_locales
     # Si había pacientes esperando, guarda el episodio y la hora de entrada en el Hash del box, 
     # activa el indicador de ocupado y registra el evento.
+
+def cargar_datos_mongo(documento):
+    """Guarda un episodio en MongoDB."""
+
+    cliente = MongoClient(settings.MONGO_URI)
+
+    try:
+        coleccion = cliente["urgencias"]["episodios_urgencias"]
+
+        coleccion.replace_one(
+            {"id_episodio": documento["id_episodio"]},
+            documento,
+            upsert=True
+        )
+
+        print(f"Episodio {documento['id_episodio']} guardado en MongoDB")
+
+    finally:
+        cliente.close()
