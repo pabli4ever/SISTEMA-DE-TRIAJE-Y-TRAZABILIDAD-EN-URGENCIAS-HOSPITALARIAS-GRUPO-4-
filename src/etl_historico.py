@@ -4,6 +4,14 @@ import json
 import pandas as pd
 import requests
 
+from datetime import datetime
+from pymongo import MongoClient, ReplaceOne
+from config import (
+    MONGO_URI,
+    MONGO_DATABASE,
+    MONGO_COLLECTION
+)
+
 
 CARPETA_DATOS = Path("data")
 
@@ -138,6 +146,75 @@ def cruzar_datos(datos_csv, datos_json):
 
     return datos_unidos
 
+def guardar_mongodb(datos):
+
+    # Comprobar que tenemos documentos para guardar.
+    if not datos:
+        print("No hay datos para guardar en MongoDB.")
+        return
+
+    # Preparar las operaciones de escritura.
+    operaciones = []
+
+    for documento in datos:
+
+        documento = documento.copy()
+
+        # Convertir las fechas ISO a fechas BSON de MongoDB.
+        for campo in ["timestamp_llegada", "timestamp_alta"]:
+
+            fecha = documento.get(campo)
+
+            if isinstance(fecha, str):
+                try:
+                    documento[campo] = datetime.fromisoformat(
+                        fecha.replace("Z", "+00:00")
+                    )
+                except ValueError:
+                    pass
+
+        identificador = documento.get("id_episodio")
+
+        if not identificador:
+            raise ValueError("Hay un episodio sin id_episodio.")
+
+        # Insertar o actualizar el episodio.
+        operaciones.append(
+            ReplaceOne(
+                {"id_episodio": identificador},
+                documento,
+                upsert=True
+            )
+        )
+
+    # Conectar con MongoDB.
+    with MongoClient(
+        MONGO_URI,
+        serverSelectionTimeoutMS=5000
+    ) as cliente:
+
+        # Comprobar la conexión.
+        cliente.admin.command("ping")
+
+        # Seleccionar base de datos y colección.
+        coleccion = cliente[MONGO_DATABASE][MONGO_COLLECTION]
+
+        # Evitar episodios duplicados.
+        coleccion.create_index(
+            "id_episodio",
+            unique=True
+        )
+
+        # Ejecutar las operaciones.
+        resultado = coleccion.bulk_write(
+            operaciones,
+            ordered=False
+        )
+
+        print("\n--- CARGA EN MONGODB ---")
+        print(f"Documentos nuevos: {resultado.upserted_count}")
+        print(f"Documentos actualizados: {resultado.modified_count}")
+        print(f"Documentos procesados: {len(operaciones)}")
 
 if __name__ == "__main__":
     # Dirección del servidor del instituto.
@@ -173,3 +250,6 @@ if __name__ == "__main__":
         f"\n[+] Archivo JSON guardado correctamente: "
         f"{nombre_archivo}"
     )
+
+    # Guardar los datos en MongoDB.
+    guardar_mongodb(datos_unidos)
