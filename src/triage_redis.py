@@ -153,21 +153,51 @@ def gestionar_boxes():
     # Si había pacientes esperando, guarda el episodio y la hora de entrada en el Hash del box, 
     # activa el indicador de ocupado y registra el evento.
 
-def cargar_datos_mongo(documento):
-    """Guarda un episodio en MongoDB."""
+def aplanar_documento(documento):
+    """
+    Toma un documento anidado (proveniente de la API y Redis) 
+    y extrae sus campos internos para dejarlos a nivel de raíz.
+    """
+    plano = {}
+    
+    # 1. Copiar el identificador principal
+    plano["id_episodio"] = documento.get("id_episodio")
+    
+    # 2. Aplanar los campos de datos_admision (si existen)
+    datos_admision = documento.get("datos_admision", {})
+    for k, v in datos_admision.items():
+        plano[k] = v
+        
+    # 3. Aplanar los campos de datos_triaje (si existen)
+    datos_triaje = documento.get("datos_triaje", {})
+    for k, v in datos_triaje.items():
+        plano[k] = v
+        
+    # 4. Incluir el resto de campos (como los del alta o cualquier otra propiedad)
+    for k, v in documento.items():
+        if k not in ["datos_admision", "datos_triaje"]:
+            plano[k] = v
+            
+    return plano
 
+
+def cargar_datos_mongo(documento):
+    """Guarda un episodio de forma aplanada en MongoDB."""
     cliente = MongoClient(settings.MONGO_URI)
 
     try:
         coleccion = cliente["urgencias"]["episodios_urgencias"]
 
+        # Aplanamos el documento antes de enviarlo a Mongo
+        documento_plano = aplanar_documento(documento)
+
         coleccion.replace_one(
-            {"id_episodio": documento["id_episodio"]},
-            documento,
+            {"id_episodio": documento_plano["id_episodio"]},
+            documento_plano,
             upsert=True
         )
 
-        print(f"Episodio {documento['id_episodio']} guardado en MongoDB")
+        print(f"Episodio {documento_plano['id_episodio']} guardado en MongoDB (formato plano)")
 
     finally:
         cliente.close()
