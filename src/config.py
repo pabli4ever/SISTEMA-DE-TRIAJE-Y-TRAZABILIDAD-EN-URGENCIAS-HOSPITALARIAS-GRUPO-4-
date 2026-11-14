@@ -12,6 +12,9 @@ class Config:
     MONGO_CONTAINER_NAME: str = os.getenv("MONGO_CONTAINER_NAME", "mongo")
     MONGO_PORT: int = int(os.getenv("MONGO_PORT", 27017))
     MONGO_DATA_PATH: str = os.getenv("MONGO_DATA_PATH", "./mongo_data")
+    MONGO_URI: str = os.getenv("MONGO_URI","mongodb://root:secret@mongo:27017/admin?authSource=admin")
+    MONGO_DATABASE: str = os.getenv("MONGO_DATABASE", "urgencias")
+    MONGO_COLLECTION: str = os.getenv("MONGO_COLLECTION", "episodios_urgencias")
 
     # Autenticación de MongoDB
     MONGO_INITDB_ROOT_USERNAME: str = os.getenv("MONGO_INITDB_ROOT_USERNAME", "root")
