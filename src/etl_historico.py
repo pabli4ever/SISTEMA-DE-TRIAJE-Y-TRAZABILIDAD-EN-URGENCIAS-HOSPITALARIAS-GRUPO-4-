@@ -4,6 +4,7 @@ import json
 import pandas as pd
 import requests
 
+from config import settings
 from datetime import datetime
 from pymongo import MongoClient, ReplaceOne
 from config import (
@@ -218,7 +219,7 @@ def guardar_mongodb(datos):
 
 if __name__ == "__main__":
     # Dirección del servidor del instituto.
-    url_base = "http://10.201.59.244:8080"
+    url_base = settings.URL_INSTITUTO
 
     # Ejecutar la descarga en el instituto.
     # descargar_archivos(

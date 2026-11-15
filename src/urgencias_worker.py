@@ -1,5 +1,6 @@
 import time
 import requests
+from config import settings
 from triage_redis import (
     procesar_novedades,
     procesar_altas,
@@ -8,7 +9,7 @@ from triage_redis import (
 
 # Importa las librerías necesarias y las funciones lógicas requeridas desde el módulo 'triage_redis'.
 
-API_URL = "http://api_urgencias_carestream:28000/api/v1/urgencias/novedades"
+API_URL = settings.API_URL
 POLLING_INTERVAL = 5  # Segundos
 
 # Define la URL interna del contenedor de la API y el intervalo de sondeo (cada 5 segundos).
