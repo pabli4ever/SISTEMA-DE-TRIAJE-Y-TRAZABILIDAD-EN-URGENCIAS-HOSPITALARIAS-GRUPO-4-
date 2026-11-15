@@ -54,7 +54,7 @@ class Config:
     # CONFIGURACIÓN DE LA APLICACIÓN
     # =============================================
     API_URL: str = os.getenv("API_URL", "http://api_urgencias_carestream:28000/api/v1/urgencias/novedades")
-    URL_INSTITUTO: str = os.getenv("URL_INSTITUTO", "")
+    URL_INSTITUTO: str = os.getenv("URL_INSTITUTO", "http://10.201.59.244:8080")
 
     # =============================================
     # HELPER: URI DE CONEXIÓN LISTA PARA USAR (PyMongo / Motor)
