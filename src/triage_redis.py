@@ -3,6 +3,7 @@ import time
 import json
 
 from pymongo import MongoClient
+from anonimizacion import anonimizar_documento
 from config import settings
 
 
@@ -184,14 +185,14 @@ def aplanar_documento(documento):
 
 
 def cargar_datos_mongo(documento):
-    """Guarda un episodio de forma aplanada en MongoDB."""
-    cliente = MongoClient(settings.MONGO_URI)
+    """Protege el episodio completo y lo guarda aplanado, sin nulos en la raíz."""
+    # El alta ya está incorporada. Aplanar después elimina también los nulos
+    # que puedan producir las edades inválidas o los SIP ausentes.
+    documento_plano = aplanar_documento(anonimizar_documento(documento))
+    cliente = MongoClient(settings.MONGO_URI, serverSelectionTimeoutMS=5000)
 
     try:
-        coleccion = cliente["urgencias"]["episodios_urgencias"]
-
-        # Aplanamos el documento antes de enviarlo a Mongo
-        documento_plano = aplanar_documento(documento)
+        coleccion = cliente[settings.MONGO_DATABASE][settings.MONGO_COLLECTION]
 
         coleccion.replace_one(
             {"id_episodio": documento_plano["id_episodio"]},

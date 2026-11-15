@@ -1,3 +1,8 @@
 # --- Docker Data ---
 mongo_data/
 docker/.env
+
+# Entorno y archivos temporales de Python
+.venv/
+__pycache__/
+*.py[cod]
