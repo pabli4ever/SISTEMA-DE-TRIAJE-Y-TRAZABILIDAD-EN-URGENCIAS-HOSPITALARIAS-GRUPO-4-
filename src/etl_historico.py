@@ -7,11 +7,7 @@ import requests
 from config import settings
 from datetime import datetime
 from pymongo import MongoClient, ReplaceOne
-from config import (
-    MONGO_URI,
-    MONGO_DATABASE,
-    MONGO_COLLECTION
-)
+from config import settings
 
 
 CARPETA_DATOS = Path("data")
@@ -190,7 +186,7 @@ def guardar_mongodb(datos):
 
     # Conectar con MongoDB.
     with MongoClient(
-        MONGO_URI,
+        settings.MONGO_URI,
         serverSelectionTimeoutMS=5000
     ) as cliente:
 
@@ -198,7 +194,7 @@ def guardar_mongodb(datos):
         cliente.admin.command("ping")
 
         # Seleccionar base de datos y colección.
-        coleccion = cliente[MONGO_DATABASE][MONGO_COLLECTION]
+        coleccion = cliente[settings.MONGO_DATABASE][settings.MONGO_COLLECTION]
 
         # Evitar episodios duplicados.
         coleccion.create_index(
