@@ -216,6 +216,7 @@ def guardar_mongodb(datos):
         print(f"Documentos actualizados: {resultado.modified_count}")
         print(f"Documentos procesados: {len(operaciones)}")
 
+
 def procesar_historico():
     """Carga, limpia y cruza los datos originales sin escribir en MongoDB."""
     obtener_clave()
@@ -261,6 +262,16 @@ def main():
         help="Generar el JSON protegido sin conectar con MongoDB.",
     )
     argumentos = parser.parse_args()
+
+    # Dirección del servidor del instituto.
+    url_base = settings.URL_INSTITUTO
+
+    # Ejecutar la descarga en el instituto, ajustando las rutas de sus archivos.
+    # descargar_archivos(
+    #     url_base + "/archivo.csv",
+    #     url_base + "/archivo.json"
+    # )
+
     datos = procesar_historico()
     # Cada salida transforma su copia del original, sin aplicar el hash dos veces.
     exportar_json(datos)
