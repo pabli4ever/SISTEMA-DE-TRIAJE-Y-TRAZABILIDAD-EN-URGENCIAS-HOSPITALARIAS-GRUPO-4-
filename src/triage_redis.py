@@ -177,8 +177,10 @@ def aplanar_documento(documento):
     for k, v in documento.items():
         if k not in ["datos_admision", "datos_triaje"]:
             plano[k] = v
+    # 5. Filtrar el diccionario resultante para eliminar cualquier clave con valor None (null)
+    plano_filtrado = {k: v for k, v in plano.items() if v is not None}
             
-    return plano
+    return plano_filtrado
 
 
 def cargar_datos_mongo(documento):
