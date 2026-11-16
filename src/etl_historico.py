@@ -137,7 +137,18 @@ def cruzar_datos(datos_csv, datos_json):
             parte.pop("id_episodio", None)
             parte.pop("sip_paciente", None)
 
+            # Incorporar la frecuencia y la tensión a las constantes.
+            constantes = parte.setdefault("constantes", {})
+
+            constantes["tension_arterial"] = registro.get(
+                "tension_arterial"
+            )
+
             registro["parte_clinico"] = parte
+
+        # Eliminar las constantes del nivel superior.
+        registro.pop("frecuencia_cardiaca", None)
+        registro.pop("tension_arterial", None)
 
         datos_unidos.append(registro)
 
