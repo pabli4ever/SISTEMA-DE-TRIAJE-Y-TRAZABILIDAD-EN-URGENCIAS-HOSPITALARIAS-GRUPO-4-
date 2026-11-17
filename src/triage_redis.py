@@ -145,7 +145,7 @@ def gestionar_boxes():
                 
                 redis_client.hset(box_key, mapping={
                     "id_episodio": id_episodio,
-                    "hora_entrada": time.time()
+                    "hora_entrada": datetime.fromtimestamp(time.time(), tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
                 })
                 redis_client.set(f"{box_key}:ocupado", "1")
                 
