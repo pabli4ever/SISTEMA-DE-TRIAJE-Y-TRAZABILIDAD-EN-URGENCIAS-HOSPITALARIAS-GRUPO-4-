@@ -76,7 +76,10 @@ docker compose up -d
 El histórico y las altas se guardan con el SIP transformado mediante HMAC-SHA256
 (32 caracteres hexadecimales), sin el campo `nombre` y con la edad agrupada por
 décadas, por ejemplo `[60-69]`. También se transforman los campos anidados.
-Las altas mantienen el filtrado de campos nulos en el nivel principal.
+Las altas usan el esquema anidado del histórico (`parte_clinico`, `constantes`
+y `triaje_manchester`), conservan los antecedentes, alergias y módulos del triaje,
+y eliminan campos nulos y estructuras vacías. Los timestamps se guardan como
+fechas BSON en UTC.
 
 La clave privada se configura como `ANON_HMAC_KEY` en `docker/.env`. Para generar
 una clave al preparar una instalación nueva:

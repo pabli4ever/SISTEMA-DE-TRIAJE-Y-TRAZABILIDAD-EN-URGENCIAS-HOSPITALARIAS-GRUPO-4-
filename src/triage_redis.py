@@ -2,6 +2,7 @@ import redis
 import time
 import json
 
+from datetime import datetime, timezone
 from pymongo import MongoClient
 from anonimizacion import anonimizar_documento
 from config import settings
@@ -154,53 +155,101 @@ def gestionar_boxes():
     # Si había pacientes esperando, guarda el episodio y la hora de entrada en el Hash del box, 
     # activa el indicador de ocupado y registra el evento.
 
-def aplanar_documento(documento):
+def construir_esquema_historico(documento):
     """
-    Toma un documento anidado (proveniente de la API y Redis) 
-    y extrae sus campos internos para dejarlos a nivel de raíz.
+    Toma el documento de Redis/API y lo estructura con el mismo esquema anidado
+    del histórico (parte_clinico, triaje_manchester, constantes, etc.),
+    eliminando valores nulos y excluyendo fechas de texto.
     """
-    plano = {}
-    
-    # 1. Copiar el identificador principal
-    plano["id_episodio"] = documento.get("id_episodio")
-    
-    # 2. Aplanar los campos de datos_admision (si existen)
-    datos_admision = documento.get("datos_admision", {})
-    for k, v in datos_admision.items():
-        plano[k] = v
-        
-    # 3. Aplanar los campos de datos_triaje (si existen)
-    datos_triaje = documento.get("datos_triaje", {})
-    for k, v in datos_triaje.items():
-        plano[k] = v
-        
-    # 4. Incluir el resto de campos (como los del alta o cualquier otra propiedad)
-    for k, v in documento.items():
-        if k not in ["datos_admision", "datos_triaje"]:
-            plano[k] = v
-    # 5. Filtrar el diccionario resultante para eliminar cualquier clave con valor None (null)
-    plano_filtrado = {k: v for k, v in plano.items() if v is not None}
-            
-    return plano_filtrado
+    # 1. Extraer datos de admisión y triaje de forma segura
+    datos_admision = documento.get("datos_admision") or {}
+    datos_triaje = documento.get("datos_triaje") or {}
+
+    constantes = (datos_triaje.get("constantes") or {}).copy()
+    for campo in ("frecuencia_cardiaca", "tension_arterial"):
+        if constantes.get(campo) is None and documento.get(campo) is not None:
+            constantes[campo] = documento[campo]
+
+    timestamp_llegada = datos_admision.get("timestamp_llegada")
+    if timestamp_llegada is None:
+        timestamp_llegada = documento.get("timestamp_llegada")
+
+    # 2. Construir el subdocumento parte_clinico anidado
+    parte_clinico = {
+        "_id_parte": documento.get("_id_parte") or f"CLIN-{documento.get('id_episodio', '')}",
+        "edad": datos_admision.get("edad"),
+        "triaje_manchester": {
+            "nivel": datos_triaje.get("nivel_manchester") or datos_triaje.get("nivel"),
+            "color": datos_triaje.get("color"),
+            "categoria_patologia": datos_triaje.get("categoria_patologia"),
+            "tiempo_max_espera_min": datos_triaje.get("tiempo_max_espera_min")
+        },
+        "constantes": constantes,
+        "antecedentes": datos_triaje.get("antecedentes", datos_admision.get("antecedentes", [])),
+        "alergias": datos_triaje.get("alergias", datos_admision.get("alergias", [])),
+        "notas_triaje": datos_triaje.get("notas_triaje")
+    }
+
+    # La API envía los módulos dentro del triaje; admitir también los de la raíz.
+    for origen in (datos_triaje, documento):
+        for k, v in origen.items():
+            if k.startswith("modulo_"):
+                parte_clinico[k] = v
+
+    # 3. Construir el documento raíz principal alineado al histórico
+    documento_estructurado = {
+        "id_episodio": documento.get("id_episodio"),
+        "sip_paciente": documento.get("sip_paciente") or datos_admision.get("sip_paciente"),
+        "timestamp_llegada": timestamp_llegada,
+        "timestamp_alta": documento.get("timestamp_alta"),
+        "motivo_consulta": datos_admision.get("motivo_consulta") or documento.get("motivo_consulta"),
+        "destino_alta": documento.get("destino_alta"),
+        "parte_clinico": parte_clinico
+    }
+
+    # 4. Función auxiliar recursiva para limpiar valores None y subdiccionarios vacíos
+    def limpiar_nulos(d):
+        if isinstance(d, dict):
+            limpio = {k: limpiar_nulos(v) for k, v in d.items()}
+            return {
+                k: v
+                for k, v in limpio.items()
+                if v is not None and v != {} and v != []
+            }
+        elif isinstance(d, list):
+            limpio = [limpiar_nulos(item) for item in d]
+            return [item for item in limpio if item is not None and item != {} and item != []]
+        return d
+
+    return limpiar_nulos(documento_estructurado)
 
 
 def cargar_datos_mongo(documento):
-    """Protege el episodio completo y lo guarda aplanado, sin nulos en la raíz."""
-    # El alta ya está incorporada. Aplanar después elimina también los nulos
-    # que puedan producir las edades inválidas o los SIP ausentes.
-    documento_plano = aplanar_documento(anonimizar_documento(documento))
+    """Guarda el episodio protegido con el esquema histórico y fechas BSON en UTC."""
+    # Se protege el documento completo, incluido el SIP recibido en el alta.
+    # El esquema histórico elimina después los nulos generados al transformar.
+    documento_estructurado = construir_esquema_historico(anonimizar_documento(documento))
+
+    for campo in ("timestamp_llegada", "timestamp_alta"):
+        ts = documento_estructurado.get(campo)
+        if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+            try:
+                documento_estructurado[campo] = datetime.fromtimestamp(ts, tz=timezone.utc)
+            except (ValueError, OverflowError, OSError):
+                pass
+
     cliente = MongoClient(settings.MONGO_URI, serverSelectionTimeoutMS=5000)
 
     try:
         coleccion = cliente[settings.MONGO_DATABASE][settings.MONGO_COLLECTION]
 
         coleccion.replace_one(
-            {"id_episodio": documento_plano["id_episodio"]},
-            documento_plano,
+            {"id_episodio": documento_estructurado["id_episodio"]},
+            documento_estructurado,
             upsert=True
         )
 
-        print(f"Episodio {documento_plano['id_episodio']} guardado en MongoDB (formato plano)")
+        print(f"Episodio {documento_estructurado['id_episodio']} guardado en MongoDB.")
 
     finally:
         cliente.close()

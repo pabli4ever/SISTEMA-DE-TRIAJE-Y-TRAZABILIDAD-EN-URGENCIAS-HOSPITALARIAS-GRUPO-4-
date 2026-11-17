@@ -2,6 +2,7 @@
 
 import contextlib
 import copy
+from datetime import datetime, timezone
 import io
 import json
 from pathlib import Path
@@ -103,9 +104,17 @@ class TestAnonimizacion(unittest.TestCase):
 
     def test_alta_incorpora_el_sip_final_y_elimina_nulos(self):
         ingreso = {"id_episodio": "EP-PRUEBA", "datos_admision": {
-            "sip_paciente": "SIP-111111", "nombre": "Prueba", "edad": 64},
-            "datos_triaje": {"nivel_manchester": 3, "modulo_pediatria": None}}
-        alta = {"id_episodio": "EP-PRUEBA", "sip_paciente": "SIP-123456", "destino_alta": "domicilio"}
+            "sip_paciente": "SIP-111111", "nombre": "Prueba", "edad": 64,
+            "timestamp_llegada": 1700000000, "fecha_hora_texto": "2023-11-14 23:13:20"},
+            "datos_triaje": {
+                "nivel_manchester": 3, "modulo_pediatria": None,
+                "antecedentes": ["hipertension"], "alergias": ["penicilina"],
+                "constantes": {"frecuencia_cardiaca": 80, "tension_arterial": "120/80"},
+                "modulo_cardiologia": {"dolor_irradiado": False, "troponinas_ng_ml": 0,
+                                       "detalle": {"ausente": None}},
+            }}
+        alta = {"id_episodio": "EP-PRUEBA", "sip_paciente": "SIP-123456", "destino_alta": "domicilio",
+                "timestamp_alta": 1700003600.0, "fecha_hora_alta": "2023-11-15 00:13:20"}
         with patch.object(triage, "redis_client") as redis, patch.object(triage, "MongoClient") as mongo, \
                 contextlib.redirect_stdout(io.StringIO()):
             redis.hgetall.return_value = {"documento": json.dumps(ingreso)}
@@ -114,8 +123,19 @@ class TestAnonimizacion(unittest.TestCase):
             guardado = coleccion.replace_one.call_args.args[1]
             self.comprobar_documento(guardado)
             self.assertEqual(guardado["sip_paciente"], "49deda73747099007a5d25bb4d08f330")
-            self.assertEqual(guardado["edad"], "[60-69]")
-            self.assertNotIn("modulo_pediatria", guardado)
+            parte = guardado["parte_clinico"]
+            self.assertEqual(parte["edad"], "[60-69]")
+            self.assertNotIn("edad", guardado)
+            self.assertEqual(parte["triaje_manchester"]["nivel"], 3)
+            self.assertNotIn("modulo_pediatria", parte)
+            self.assertEqual(parte["antecedentes"], ["hipertension"])
+            self.assertEqual(parte["alergias"], ["penicilina"])
+            self.assertEqual(parte["constantes"], {"frecuencia_cardiaca": 80, "tension_arterial": "120/80"})
+            self.assertEqual(parte["modulo_cardiologia"], {"dolor_irradiado": False, "troponinas_ng_ml": 0})
+            self.assertEqual(guardado["timestamp_llegada"], datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc))
+            self.assertEqual(guardado["timestamp_alta"], datetime(2023, 11, 14, 23, 13, 20, tzinfo=timezone.utc))
+            for campo in ("frecuencia_cardiaca", "tension_arterial", "fecha_hora_texto", "fecha_hora_alta"):
+                self.assertNotIn(campo, guardado)
             redis.delete.assert_any_call("episodio:EP-PRUEBA")
 
     def test_alta_elimina_tambien_los_nulos_generados_al_transformar(self):
@@ -124,7 +144,28 @@ class TestAnonimizacion(unittest.TestCase):
         with patch.object(triage, "MongoClient") as mongo, contextlib.redirect_stdout(io.StringIO()):
             triage.cargar_datos_mongo(original)
             coleccion = mongo.return_value[triage.settings.MONGO_DATABASE][triage.settings.MONGO_COLLECTION]
-            self.assertEqual(coleccion.replace_one.call_args.args[1], {"id_episodio": "EP-PRUEBA"})
+            self.assertEqual(coleccion.replace_one.call_args.args[1], {
+                "id_episodio": "EP-PRUEBA", "parte_clinico": {"_id_parte": "CLIN-EP-PRUEBA"},
+            })
+
+    def test_altas_con_fecha_cero_y_constantes_en_raiz(self):
+        original = {"id_episodio": "EP-PRUEBA", "frecuencia_cardiaca": 90, "tension_arterial": "130/80",
+                    "datos_admision": {"timestamp_llegada": 0, "antecedentes": ["asma"]},
+                    "datos_triaje": {"tiempo_max_espera_min": 0, "constantes": {"saturacion_o2": None}}}
+        copia = copy.deepcopy(original)
+        with patch.object(triage, "MongoClient") as mongo, contextlib.redirect_stdout(io.StringIO()), \
+                patch.object(triage.settings, "MONGO_DATABASE", "base_de_prueba"), \
+                patch.object(triage.settings, "MONGO_COLLECTION", "coleccion_de_prueba"):
+            triage.cargar_datos_mongo(original)
+            coleccion = mongo.return_value["base_de_prueba"]["coleccion_de_prueba"]
+            guardado = coleccion.replace_one.call_args.args[1]
+            self.assertEqual(guardado["timestamp_llegada"], datetime(1970, 1, 1, tzinfo=timezone.utc))
+            self.assertEqual(guardado["parte_clinico"]["triaje_manchester"]["tiempo_max_espera_min"], 0)
+            self.assertEqual(guardado["parte_clinico"]["constantes"], {"frecuencia_cardiaca": 90, "tension_arterial": "130/80"})
+            self.assertEqual(guardado["parte_clinico"]["antecedentes"], ["asma"])
+            self.assertNotIn("frecuencia_cardiaca", guardado)
+            self.assertNotIn("tension_arterial", guardado)
+            self.assertEqual(original, copia)
 
     def test_historico_completo_conserva_episodios_y_correspondencias(self):
         datos = etl.procesar_historico()
@@ -139,6 +180,10 @@ class TestAnonimizacion(unittest.TestCase):
         correspondencias = {}
         for original, salida in zip(datos, protegido):
             self.assertEqual(original["id_episodio"], salida["id_episodio"])
+            self.assertNotIn("frecuencia_cardiaca", salida)
+            self.assertNotIn("tension_arterial", salida)
+            if "parte_clinico" in salida:
+                self.assertIn("tension_arterial", salida["parte_clinico"]["constantes"])
             sip = original["sip_paciente"].strip().upper()
             self.assertEqual(correspondencias.setdefault(sip, salida["sip_paciente"]), salida["sip_paciente"])
         self.assertEqual(len(set(correspondencias.values())), len(correspondencias))
