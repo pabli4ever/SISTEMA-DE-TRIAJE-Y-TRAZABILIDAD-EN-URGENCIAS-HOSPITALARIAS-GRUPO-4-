@@ -8,9 +8,9 @@ def ejecutar_analytics():
     
     print(f"Conectado a MongoDB: {settings.MONGO_DATABASE}.{settings.MONGO_COLLECTION}\n")
 
-    # =========================================================================
-    # 1. Tiempo medio de estancia (en minutos) por categoría patológica de triaje
-    # =========================================================================
+   
+    # Consulta_1: Tiempo medio de estancia (en minutos) por categoría patológica de triaje
+    
     pipeline_estancia = [
         {
             "$match": {
@@ -62,9 +62,8 @@ def ejecutar_analytics():
     
     print("\n" + "="*70 + "\n")
 
-    # =========================================================================
-    # 2. Distribución porcentual de destinos al alta según grupos de edad
-    # =========================================================================
+    # Consulta_2. Distribución porcentual de destinos al alta según grupos de edad
+    
     pipeline_destinos = [
         {
             "$match": {
