@@ -1,6 +1,7 @@
 import time
 import requests
 from config import settings
+from anonimizacion import obtener_clave
 from triage_redis import (
     procesar_novedades,
     procesar_altas,
@@ -43,6 +44,8 @@ def consultar_api():
 # Si es exitosa (200), retorna el JSON decodificado; si falla, registra el error en el buffer de eventos.
 
 def main():
+    # Comprobar la clave antes de consumir eventos de la API.
+    obtener_clave()
     registrar_evento("Iniciando Agente Ingestor de Urgencias...")
     while True:
         datos = consultar_api()

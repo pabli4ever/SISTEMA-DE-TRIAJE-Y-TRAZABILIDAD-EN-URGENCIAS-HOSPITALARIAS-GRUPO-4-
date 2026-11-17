@@ -58,6 +58,8 @@ services:
     image: python:3.11-alpine
     container_name: python-server
     restart: unless-stopped
+    env_file:
+      - .env
     volumes:
       # Carpeta de código fuente
       - ../src:/app
@@ -74,6 +76,7 @@ services:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis
       - MONGO_HOST=mongo
+      - DATA_DIR=/app/data
     networks:
       - ${DOCKER_NETWORK_NAME:-shared-network}
 

@@ -1,8 +1,11 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-# Carga las variables del archivo .env al entorno del sistema
-load_dotenv()
+# En local se lee docker/.env; en Docker estas variables llegan mediante env_file.
+# Las variables que ya existan en el entorno tienen prioridad.
+RAIZ_PROYECTO = Path(__file__).resolve().parent.parent
+load_dotenv(RAIZ_PROYECTO / "docker" / ".env")
 
 class Config:
     # =============================================
@@ -55,6 +58,10 @@ class Config:
     # =============================================
     API_URL: str = os.getenv("API_URL", "http://api_urgencias_carestream:28000/api/v1/urgencias/novedades")
     URL_INSTITUTO: str = os.getenv("URL_INSTITUTO", "http://10.201.59.244:8080")
+    DATA_DIR: Path = Path(os.getenv("DATA_DIR", str(RAIZ_PROYECTO / "data")))
+
+    # Clave privada de 32 bytes en hexadecimal, sin un secreto público por defecto.
+    ANON_HMAC_KEY: str = os.getenv("ANON_HMAC_KEY", "")
 
     # =============================================
     # HELPER: URI DE CONEXIÓN LISTA PARA USAR (PyMongo / Motor)

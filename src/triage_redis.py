@@ -2,8 +2,9 @@ import redis
 import time
 import json
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pymongo import MongoClient
+from anonimizacion import anonimizar_documento
 from config import settings
 
 
@@ -156,13 +157,22 @@ def gestionar_boxes():
 
 def construir_esquema_historico(documento):
     """
-    Toma el documento de Redis/API y lo estructura con el mismo esquema anidado 
-    del histórico (parte_clinico, triaje_manchester, constantes, etc.), 
+    Toma el documento de Redis/API y lo estructura con el mismo esquema anidado
+    del histórico (parte_clinico, triaje_manchester, constantes, etc.),
     eliminando valores nulos y excluyendo fechas de texto.
     """
     # 1. Extraer datos de admisión y triaje de forma segura
-    datos_admision = documento.get("datos_admision", {})
-    datos_triaje = documento.get("datos_triaje", {})
+    datos_admision = documento.get("datos_admision") or {}
+    datos_triaje = documento.get("datos_triaje") or {}
+
+    constantes = (datos_triaje.get("constantes") or {}).copy()
+    for campo in ("frecuencia_cardiaca", "tension_arterial"):
+        if constantes.get(campo) is None and documento.get(campo) is not None:
+            constantes[campo] = documento[campo]
+
+    timestamp_llegada = datos_admision.get("timestamp_llegada")
+    if timestamp_llegada is None:
+        timestamp_llegada = documento.get("timestamp_llegada")
 
     # 2. Construir el subdocumento parte_clinico anidado
     parte_clinico = {
@@ -174,26 +184,25 @@ def construir_esquema_historico(documento):
             "categoria_patologia": datos_triaje.get("categoria_patologia"),
             "tiempo_max_espera_min": datos_triaje.get("tiempo_max_espera_min")
         },
-        "constantes": datos_triaje.get("constantes", {}),
-        "antecedentes": datos_admision.get("antecedentes", []),
-        "alergias": datos_admision.get("alergias", []),
+        "constantes": constantes,
+        "antecedentes": datos_triaje.get("antecedentes", datos_admision.get("antecedentes", [])),
+        "alergias": datos_triaje.get("alergias", datos_admision.get("alergias", [])),
         "notas_triaje": datos_triaje.get("notas_triaje")
     }
 
-    # Incluir módulos específicos si existen en el documento original (ej. modulo_psiquiatria, modulo_cardiologia)
-    for k, v in documento.items():
-        if k.startswith("modulo_"):
-            parte_clinico[k] = v
+    # La API envía los módulos dentro del triaje; admitir también los de la raíz.
+    for origen in (datos_triaje, documento):
+        for k, v in origen.items():
+            if k.startswith("modulo_"):
+                parte_clinico[k] = v
 
     # 3. Construir el documento raíz principal alineado al histórico
     documento_estructurado = {
         "id_episodio": documento.get("id_episodio"),
-        "sip_paciente": datos_admision.get("sip_paciente") or documento.get("sip_paciente"),
-        "timestamp_llegada": datos_admision.get("timestamp_llegada") or documento.get("timestamp_llegada"),
+        "sip_paciente": documento.get("sip_paciente") or datos_admision.get("sip_paciente"),
+        "timestamp_llegada": timestamp_llegada,
         "timestamp_alta": documento.get("timestamp_alta"),
         "motivo_consulta": datos_admision.get("motivo_consulta") or documento.get("motivo_consulta"),
-        "frecuencia_cardiaca": documento.get("frecuencia_cardiaca"),
-        "tension_arterial": documento.get("tension_arterial"),
         "destino_alta": documento.get("destino_alta"),
         "parte_clinico": parte_clinico
     }
@@ -201,36 +210,38 @@ def construir_esquema_historico(documento):
     # 4. Función auxiliar recursiva para limpiar valores None y subdiccionarios vacíos
     def limpiar_nulos(d):
         if isinstance(d, dict):
+            limpio = {k: limpiar_nulos(v) for k, v in d.items()}
             return {
-                k: limpiar_nulos(v) 
-                for k, v in d.items() 
+                k: v
+                for k, v in limpio.items()
                 if v is not None and v != {} and v != []
             }
         elif isinstance(d, list):
-            return [limpiar_nulos(item) for item in d if item is not None]
+            limpio = [limpiar_nulos(item) for item in d]
+            return [item for item in limpio if item is not None and item != {} and item != []]
         return d
 
     return limpiar_nulos(documento_estructurado)
 
 
 def cargar_datos_mongo(documento):
-    """Guarda un episodio estructurado en MongoDB convirtiendo los timestamps a BSON datetime."""
-    cliente = MongoClient(settings.MONGO_URI)
+    """Guarda el episodio protegido con el esquema histórico y fechas BSON en UTC."""
+    # Se protege el documento completo, incluido el SIP recibido en el alta.
+    # El esquema histórico elimina después los nulos generados al transformar.
+    documento_estructurado = construir_esquema_historico(anonimizar_documento(documento))
+
+    for campo in ("timestamp_llegada", "timestamp_alta"):
+        ts = documento_estructurado.get(campo)
+        if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+            try:
+                documento_estructurado[campo] = datetime.fromtimestamp(ts, tz=timezone.utc)
+            except (ValueError, OverflowError, OSError):
+                pass
+
+    cliente = MongoClient(settings.MONGO_URI, serverSelectionTimeoutMS=5000)
 
     try:
-        coleccion = cliente["urgencias"]["episodios_urgencias"]
-
-        # Estructuramos el documento con el formato anidado del histórico y sin nulos
-        documento_estructurado = construir_esquema_historico(documento)
-
-        # Convertir los timestamps numéricos (int/float) a objetos datetime de BSON
-        for campo in ["timestamp_llegada", "timestamp_alta"]:
-            ts = documento_estructurado.get(campo)
-            if isinstance(ts, (int, float)):
-                try:
-                    documento_estructurado[campo] = datetime.fromtimestamp(ts)
-                except Exception:
-                    pass
+        coleccion = cliente[settings.MONGO_DATABASE][settings.MONGO_COLLECTION]
 
         coleccion.replace_one(
             {"id_episodio": documento_estructurado["id_episodio"]},

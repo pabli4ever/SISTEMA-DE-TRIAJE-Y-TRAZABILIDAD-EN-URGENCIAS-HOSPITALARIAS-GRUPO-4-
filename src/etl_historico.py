@@ -1,16 +1,17 @@
 from pathlib import Path
+import argparse
 import json
 
 import pandas as pd
 import requests
 
-from config import settings
 from datetime import datetime
 from pymongo import MongoClient, ReplaceOne
+from anonimizacion import anonimizar_documento, obtener_clave
 from config import settings
 
 
-CARPETA_DATOS = Path("data")
+CARPETA_DATOS = settings.DATA_DIR
 
 
 def descargar_archivos(url_csv, url_json):
@@ -31,6 +32,7 @@ def cargar_csv():
     datos_csv = pd.read_csv(
         CARPETA_DATOS / "admisiones_historico.csv",
         encoding="utf-8-sig",
+        dtype={"sip_paciente": "string"},
         na_values=[
             "N/D", "s/d", "ERROR", "PENDIENTE",
             "None", "null", "NULL", ""
@@ -155,6 +157,7 @@ def cruzar_datos(datos_csv, datos_json):
     return datos_unidos
 
 def guardar_mongodb(datos):
+    """Recibe los documentos originales y protege una copia antes de escribir."""
 
     # Comprobar que tenemos documentos para guardar.
     if not datos:
@@ -166,7 +169,7 @@ def guardar_mongodb(datos):
 
     for documento in datos:
 
-        documento = documento.copy()
+        documento = anonimizar_documento(documento)
 
         # Convertir las fechas ISO a fechas BSON de MongoDB.
         for campo in ["timestamp_llegada", "timestamp_alta"]:
@@ -224,16 +227,10 @@ def guardar_mongodb(datos):
         print(f"Documentos actualizados: {resultado.modified_count}")
         print(f"Documentos procesados: {len(operaciones)}")
 
-if __name__ == "__main__":
-    # Dirección del servidor del instituto.
-    url_base = settings.URL_INSTITUTO
 
-    # Ejecutar la descarga en el instituto.
-    # descargar_archivos(
-    #     url_base + "/archivo.csv",
-    #     url_base + "/archivo.json"
-    # )
-
+def procesar_historico():
+    """Carga, limpia y cruza los datos originales sin escribir en MongoDB."""
+    obtener_clave()
     datos_csv = cargar_csv()
     datos_json = cargar_json()
 
@@ -248,16 +245,50 @@ if __name__ == "__main__":
         datos_json
     )
 
-    # Exportar los datos a JSON.
-    nombre_archivo = CARPETA_DATOS / "estado_urgencias.json"
+    return datos_unidos
+
+
+def exportar_json(datos, nombre_archivo=None):
+    """Recibe documentos originales y exporta una copia protegida como lista JSON."""
+    obtener_clave()
+    datos_protegidos = [anonimizar_documento(documento) for documento in datos]
+    nombre_archivo = Path(nombre_archivo) if nombre_archivo else CARPETA_DATOS / "estado_urgencias.json"
+    nombre_archivo.parent.mkdir(parents=True, exist_ok=True)
 
     with open(nombre_archivo, "w", encoding="utf-8") as archivo:
-        json.dump(datos_unidos, archivo, ensure_ascii=False, indent=4)
+        json.dump(datos_protegidos, archivo, ensure_ascii=False, indent=4, allow_nan=False)
 
     print(
         f"\n[+] Archivo JSON guardado correctamente: "
         f"{nombre_archivo}"
     )
 
-    # Guardar los datos en MongoDB.
-    guardar_mongodb(datos_unidos)
+    return nombre_archivo
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Carga histórica con protección de identificadores.")
+    parser.add_argument(
+        "--solo-json", action="store_true",
+        help="Generar el JSON protegido sin conectar con MongoDB.",
+    )
+    argumentos = parser.parse_args()
+
+    # Dirección del servidor del instituto.
+    url_base = settings.URL_INSTITUTO
+
+    # Ejecutar la descarga en el instituto, ajustando las rutas de sus archivos.
+    # descargar_archivos(
+    #     url_base + "/archivo.csv",
+    #     url_base + "/archivo.json"
+    # )
+
+    datos = procesar_historico()
+    # Cada salida transforma su copia del original, sin aplicar el hash dos veces.
+    exportar_json(datos)
+    if not argumentos.solo_json:
+        guardar_mongodb(datos)
+
+
+if __name__ == "__main__":
+    main()
