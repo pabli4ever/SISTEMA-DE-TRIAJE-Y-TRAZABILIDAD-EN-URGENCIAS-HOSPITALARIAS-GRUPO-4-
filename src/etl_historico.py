@@ -1,17 +1,66 @@
 from pathlib import Path
 import argparse
 import json
+import re
 
 import pandas as pd
 import requests
 
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pymongo import MongoClient, ReplaceOne
 from anonimizacion import anonimizar_documento, obtener_clave
 from config import settings
 
 
 CARPETA_DATOS = settings.DATA_DIR
+
+# El histórico del instituto está en hora local de España. Los valores que
+# terminan en "Z" no son UTC real: es la marca que añade pandas al serializar
+# una fecha sin zona horaria, pero el reloj sigue siendo local.
+ZONA_HORARIA_LOCAL = ZoneInfo("Europe/Madrid")
+
+VALORES_NULOS = [
+    "N/D", "s/d", "ERROR", "PENDIENTE",
+    "None", "null", "NULL", ""
+]
+
+def normalizar_timestamp(valor):
+
+    if pd.isna(valor):
+        return pd.NaT
+
+    texto = str(valor).strip()
+
+    if texto in VALORES_NULOS:
+        return pd.NaT
+
+    # Quitar la marca de zona horaria: el dato de origen es hora local.
+    texto_sin_zona = re.sub(
+        r"(Z|[+-]\d{2}:?\d{2})$",
+        "",
+        texto
+    ).strip()
+
+    # Unificar separadores para poder aplicar un formato concreto.
+    normalizado = texto_sin_zona.replace("/", "-")
+
+    try:
+        if re.match(r"^\d{4}-", normalizado):
+            # AAAA-MM-DD: el año va primero, así que no hay ambigüedad día/mes.
+            fecha = datetime.fromisoformat(normalizado)
+        elif re.search(r"(AM|PM)$", texto_sin_zona, re.IGNORECASE):
+            fecha = datetime.strptime(normalizado, "%d-%m-%Y %I:%M %p")
+        elif re.search(r"\d{2}:\d{2}:\d{2}$", normalizado):
+            fecha = datetime.strptime(normalizado, "%d-%m-%Y %H:%M:%S")
+        else:
+            fecha = datetime.strptime(normalizado, "%d-%m-%Y %H:%M")
+    except ValueError:
+        return pd.NaT
+
+    fecha_local = fecha.replace(tzinfo=ZONA_HORARIA_LOCAL)
+
+    return pd.Timestamp(fecha_local.astimezone(timezone.utc))
 
 
 def descargar_archivos(url_csv, url_json):
@@ -76,15 +125,9 @@ def limpiar_datos(datos_csv, datos_json):
         subset="id_episodio"
     ).copy()
 
-    # Unificar las fechas.
+    # Unificar las fechas: interpretar cada formato en hora local y pasar a UTC.
     for columna in ["timestamp_llegada", "timestamp_alta"]:
-        datos_csv[columna] = pd.to_datetime(
-            datos_csv[columna],
-            format="mixed",
-            dayfirst=True,
-            errors="coerce",
-            utc=True
-        )
+        datos_csv[columna] = datos_csv[columna].map(normalizar_timestamp)
 
     # Convertir las pulsaciones a números.
     datos_csv["frecuencia_cardiaca"] = pd.to_numeric(
@@ -249,20 +292,9 @@ def procesar_historico():
 
 
 def exportar_json(datos, nombre_archivo=None):
-    """Recibe documentos originales y exporta una copia protegida como lista JSON."""
     obtener_clave()
     datos_protegidos = [anonimizar_documento(documento) for documento in datos]
-    nombre_archivo = Path(nombre_archivo) if nombre_archivo else CARPETA_DATOS / "estado_urgencias.json"
-    nombre_archivo.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(nombre_archivo, "w", encoding="utf-8") as archivo:
-        json.dump(datos_protegidos, archivo, ensure_ascii=False, indent=4, allow_nan=False)
-
-    print(
-        f"\n[+] Archivo JSON guardado correctamente: "
-        f"{nombre_archivo}"
-    )
-
+    
     return nombre_archivo
 
 
