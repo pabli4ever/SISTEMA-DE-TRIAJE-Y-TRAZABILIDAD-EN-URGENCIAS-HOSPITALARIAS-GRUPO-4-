@@ -57,7 +57,7 @@ class Config:
     # CONFIGURACIÓN DE LA APLICACIÓN
     # =============================================
     API_URL: str = os.getenv("API_URL", "http://api_urgencias_carestream:28000/api/v1/urgencias/novedades")
-    URL_INSTITUTO: str = os.getenv("URL_INSTITUTO", "http://10.201.59.244:8080")
+    URL_INSTITUTO: str = os.getenv("URL_INSTITUTO", "http://10.201.59.248:8088")
     DATA_DIR: Path = Path(os.getenv("DATA_DIR", str(RAIZ_PROYECTO / "data")))
 
     # Clave privada de 32 bytes en hexadecimal, sin un secreto público por defecto.
