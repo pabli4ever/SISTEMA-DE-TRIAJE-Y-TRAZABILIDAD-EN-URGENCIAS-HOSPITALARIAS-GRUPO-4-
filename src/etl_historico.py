@@ -311,8 +311,8 @@ def main():
 
     # Ejecutar la descarga en el instituto, ajustando las rutas de sus archivos.
     # descargar_archivos(
-    #     url_base + "/archivo.csv",
-    #     url_base + "/archivo.json"
+    #     url_base + "/admisiones_historico.csv",
+    #     url_base + "/partes_clinicos.json"
     # )
 
     datos = procesar_historico()
